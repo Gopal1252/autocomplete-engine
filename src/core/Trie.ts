@@ -50,6 +50,17 @@ export class Trie{
         return suggestions;
     }
 
+    get(term: string): SearchTerm | null {
+        let temp = this.root;
+        for (let i = 0; i < term.length; i++) {
+            if (!temp.children.has(term[i])) {
+                return null;
+            }
+            temp = temp.children.get(term[i])!;
+        }
+        return temp.isEndOfWord ? temp.metadata : null;
+    }
+
     has(term: string): boolean {
         let temp = this.root;
         for (let i = 0; i < term.length; i++) {
