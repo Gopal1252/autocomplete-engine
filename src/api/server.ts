@@ -1,4 +1,5 @@
 import express from "express";
+import cors from "cors";
 import { AutocompleteService } from "../service/AutocompleteService.js";
 import { createRoutes } from "./routes.js";
 
@@ -6,14 +7,7 @@ export function createServer(service: AutocompleteService) {
     const app = express();
 
     app.use(express.json());
-
-    //cors
-    app.use((req, res, next) => {
-        res.setHeader('Access-Control-Allow-Origin', '*');
-        res.setHeader('Access-Control-Allow-Methods', 'GET, POST');
-        res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-        next();
-    });
+    app.use(cors());
 
     //routes
     app.use(createRoutes(service));
