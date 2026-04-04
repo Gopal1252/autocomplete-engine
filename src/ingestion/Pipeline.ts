@@ -1,12 +1,13 @@
 import { Trie } from "../core/Trie.js";
 import { RawSearchLog } from "../core/types.js";
 import { Cleaner } from "./Cleaner.js";
+import { BKTree } from "../fuzzy/BKTree.js";
 
 export class Pipeline{
     private trie: Trie;
-    private bkTree?: any;
+    private bkTree?: BKTree;
 
-    constructor(trie: Trie, bkTree?: any){
+    constructor(trie: Trie, bkTree?: BKTree){
         this.trie = trie;
         this.bkTree = bkTree;
     }
