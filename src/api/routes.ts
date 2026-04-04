@@ -14,9 +14,9 @@ export function createRoutes(service : AutocompleteService): Router{
         const n = req.query.n ? parseInt(req.query.n as string) : undefined
 
         const hitsBefore = service.getStats().cacheHits;
-        const start = Date.now();
+        const start = performance.now();
         const suggestions = service.getSuggestions(prefix, n);
-        const queryTimeMs = Date.now() - start;
+        const queryTimeMs = parseFloat((performance.now() - start).toFixed(3));
         const fromCache = service.getStats().cacheHits > hitsBefore;
 
         res.json({ suggestions, meta: { queryTimeMs, fromCache } });
