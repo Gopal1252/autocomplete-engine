@@ -3,9 +3,11 @@ import { SearchTerm } from "./types.js";
 
 export class Trie{
     root: TrieNode;
+    count: number;
 
     constructor(){
         this.root = new TrieNode();
+        this.count = 0;
     }
 
     insert(term: string, metadata: SearchTerm): void{
@@ -19,6 +21,9 @@ export class Trie{
                 temp.children.set(term[i],nextNode);
                 temp = nextNode;
             }
+        }
+        if(!temp.isEndOfWord){
+            this.count++;
         }
         temp.isEndOfWord = true;
         temp.metadata = metadata;
@@ -90,6 +95,7 @@ export class Trie{
             return false; // path exists but it's not a complete term
         }
 
+        this.count--;
         temp.isEndOfWord = false;
         temp.metadata = null;
 
