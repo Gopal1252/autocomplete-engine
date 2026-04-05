@@ -5,49 +5,76 @@ import { Ranker } from "../ranking/Ranker.js";
 import { BKTree } from "../fuzzy/BKTree.js";
 import { levenshteinDistance } from "../fuzzy/Levenshtein.js";
 import { Pipeline } from "../ingestion/Pipeline.js";
+import { SearchTermRepo } from "../db/SearchTermRepo.js";
+import { RedisCache } from "../cache/RedisCache.js";
 
 export class AutocompleteService {
     trie: Trie;
-    cache: LRUCache<string, ScoredSuggestion[]>;
+    lruCache: LRUCache<string, ScoredSuggestion[]>;
     ranker: Ranker;
     bkTree: BKTree;
     fuzzyEnabled: boolean;
     fuzzyMaxDistance: number;
     maxSuggestions: number;
     pipeline: Pipeline;
+    redisCache : RedisCache;
+    repo : SearchTermRepo;
 
     private impressions: Map<string, number>;
     private clicks: Map<string, number>;
 
-    private cacheHits: number;
+    private l1Hits: number;
+    private l2Hits: number;
     private totalQueries: number;
 
-    constructor(config: AutocompleteConfig) {
+    constructor(config: AutocompleteConfig, repo: SearchTermRepo, redisCache: RedisCache) {
         this.trie = new Trie();
-        this.cache = new LRUCache<string, ScoredSuggestion[]>(config.cacheMaxSize, config.cacheTTLMs);
+        this.lruCache = new LRUCache<string, ScoredSuggestion[]>(config.cacheMaxSize, config.cacheTTLMs);
         this.ranker = new Ranker(config.rankingWeights);
         this.bkTree = new BKTree(levenshteinDistance);
         this.fuzzyEnabled = config.fuzzyEnabled;
         this.fuzzyMaxDistance = config.fuzzyMaxDistance;
         this.maxSuggestions = config.maxSuggestions;
         this.pipeline = new Pipeline(this.trie, this.bkTree);
+        this.redisCache = redisCache;
+        this.repo = repo;
 
         this.impressions = new Map<string, number>();
         this.clicks = new Map<string, number>();
 
-        this.cacheHits = 0;
+        this.l1Hits = 0;
+        this.l2Hits = 0;
         this.totalQueries = 0;
     }
 
-    getSuggestions(prefix: string, n?: number): ScoredSuggestion[] {
+    //Load all terms from Postgres into trie + BK-tree on boot
+    async boot(): Promise<void>{
+        const terms = await this.repo.getAll();
+        for(const term of terms){
+            this.trie.insert(term.term, term);
+            this.bkTree.insert(term.term);
+        }
+        console.log(`Loaded ${terms.length} terms from database`);
+    }
+
+    async getSuggestions(prefix: string, n?: number): Promise<ScoredSuggestion[]> {
         const searchTerm = prefix.toLowerCase().trim();
         const requiredSuggestions = n ?? this.maxSuggestions;
         this.totalQueries++;
 
-        if(this.cache.has(searchTerm)){//cache hit
-            this.cacheHits++;
-            return this.cache.get(searchTerm)!;
+        //L1: in-memory LRU cache
+        if(this.lruCache.has(searchTerm)){
+            this.l1Hits++;
+            return this.lruCache.get(searchTerm)!;
         }
+
+        //L2: Redis cache
+        const redisResult = await this.redisCache.get(searchTerm);
+        if(redisResult){
+            this.l2Hits++;
+            this.lruCache.set(searchTerm, redisResult); // promote to L1
+            return redisResult;
+        } 
 
         const suggestions : SearchTerm[] = this.trie.getAllWithPrefix(searchTerm);
 
@@ -77,18 +104,29 @@ export class AutocompleteService {
         //take the top N suggestions
         const topSuggestions = scoredSuggestions.slice(0, requiredSuggestions);
 
-        //cache the result
-        this.cache.set(searchTerm, topSuggestions);
+        //cache in both L1 and L2
+        this.lruCache.set(searchTerm, topSuggestions);
+        await this.redisCache.set(searchTerm, topSuggestions);
 
         return topSuggestions;
     }
 
-    ingest(logs: RawSearchLog[]): void {
+    async ingest(logs: RawSearchLog[]): Promise<void> {
         this.pipeline.ingest(logs);
-        this.cache.clear();
+
+        // persist each term to Postgres                                                                                                                   
+        for (const log of logs) {
+            const term = this.trie.get(log.query.toLowerCase().trim());                                                                                    
+            if (term) {                                                                                                                                    
+                await this.repo.upsert(term);
+            }                                                                                                                                              
+        } 
+
+        this.lruCache.clear();
+        await this.redisCache.clear();
     }
 
-    trackEvent(event: AutocompleteEvent): void{
+    async trackEvent(event: AutocompleteEvent): Promise<void>{
         if(event.type === 'impression'){
             for(const term of event.terms){
                 this.impressions.set(term, (this.impressions.get(term) ?? 0) + 1);
@@ -103,13 +141,17 @@ export class AutocompleteService {
         //recompute the click through rate for the affected terms
         for (const term of event.terms) {                                                                                                                          
             const impressions = this.impressions.get(term) ?? 0;                                                                                                   
-            if (impressions === 0) continue;                                                                                                                       
-            const clicks = this.clicks.get(term) ?? 0;
+            if (impressions === 0) continue;      
 
-            //update only ctr
+            const clicks = this.clicks.get(term) ?? 0;
+            const ctr = clicks / impressions;
+
+            //update only ctr in trie
             const entry = this.trie.get(term);//object is passed by reference  
             if(entry){
-                entry.clickThroughRate = clicks/impressions;
+                entry.clickThroughRate = ctr;
+                //persist CTR to Postgres
+                await this.repo.updateCTR(term, ctr); 
             }                                                                                                                                                                                                                       
         } 
     }
@@ -117,10 +159,12 @@ export class AutocompleteService {
     getStats(){
         return {
             totalTerms: this.trie.count,
-            cacheSize: this.cache.size(),
-            cacheHitRate: this.totalQueries === 0 ? 0 : this.cacheHits / this.totalQueries,
+            l1CacheSize: this.lruCache.size(),
+            l1Hits: this.l1Hits,
+            l2Hits: this.l2Hits,
+            totalCacheHits: this.l1Hits + this.l2Hits,
+            cacheHitRate: this.totalQueries === 0 ? 0 : (this.l1Hits + this.l2Hits) / this.totalQueries,
             totalQueries: this.totalQueries,
-            cacheHits: this.cacheHits,
             fuzzyEnabled: this.fuzzyEnabled
         };
     }
