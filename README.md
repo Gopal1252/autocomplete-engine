@@ -1,8 +1,14 @@
 # Autocomplete Engine
 
-A search autocomplete backend built in TypeScript. Implements trie-based prefix search, weighted ranking, LRU caching, fuzzy matching, and a data ingestion pipeline — all from scratch, no external libraries for the core logic.
+A search autocomplete backend built in TypeScript. Implements trie-based prefix search, weighted ranking, two-layer caching (in-memory LRU + Redis), fuzzy matching, and a data ingestion pipeline — all core data structures built from scratch.
 
 Built as a learning project to understand how autocomplete systems work under the hood.
+
+## Prerequisites
+
+- Node.js
+- PostgreSQL (running locally)
+- Redis (running locally)
 
 ## Quick Start
 
@@ -10,10 +16,16 @@ Built as a learning project to understand how autocomplete systems work under th
 git clone <repo-url>
 cd autocomplete-engine
 npm install
+```
+
+Create a `.env` file with your Postgres and Redis connection details (see `.env.example`), then:
+
+```bash
+createdb autocomplete
 npm run dev
 ```
 
-The server starts on port 3000 with ~70 seed terms pre-loaded.
+On first run, the server seeds the database with ~70 terms. On subsequent runs, it loads from Postgres.
 
 ## Try it
 
@@ -56,6 +68,6 @@ npm test
 - **Trie** for fast prefix lookup
 - **BK-tree** with Levenshtein distance for fuzzy matching (handles typos)
 - **Ranker** scores results using frequency, recency, and click-through rate
-- **LRU Cache** with TTL to avoid redundant lookups
+- **Two-layer cache** — L1 (in-memory LRU) + L2 (Redis) with TTL
 - **Ingestion Pipeline** cleans and normalizes raw search logs before indexing
 - **AutocompleteService** ties everything together
