@@ -18,7 +18,18 @@ cd autocomplete-engine
 npm install
 ```
 
-Create a `.env` file with your Postgres and Redis connection details (see `.env.example`), then:
+Create a `.env` file:
+```
+DB_HOST=localhost
+DB_PORT=5432
+DB_USER=youruser
+DB_PASSWORD=yourpassword
+DB_NAME=autocomplete
+REDIS_HOST=localhost
+REDIS_PORT=6379
+```
+
+Then:
 
 ```bash
 createdb autocomplete

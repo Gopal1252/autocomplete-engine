@@ -5,6 +5,7 @@ import { Ranker } from "../ranking/Ranker.js";
 import { BKTree } from "../fuzzy/BKTree.js";
 import { levenshteinDistance } from "../fuzzy/Levenshtein.js";
 import { Pipeline } from "../ingestion/Pipeline.js";
+import { Cleaner } from "../ingestion/Cleaner.js";
 import { SearchTermRepo } from "../db/SearchTermRepo.js";
 import { RedisCache } from "../cache/RedisCache.js";
 
@@ -116,7 +117,7 @@ export class AutocompleteService {
 
         // persist each term to Postgres                                                                                                                   
         for (const log of logs) {
-            const term = this.trie.get(log.query.toLowerCase().trim());                                                                                    
+            const term = this.trie.get(Cleaner.clean(log.query));                                                                                    
             if (term) {                                                                                                                                    
                 await this.repo.upsert(term);
             }                                                                                                                                              
