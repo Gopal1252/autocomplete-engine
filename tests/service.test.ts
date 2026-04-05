@@ -23,6 +23,7 @@ const defaultConfig: AutocompleteConfig = {
 // Mock repo — no-ops, no real DB
 const mockRepo = {
     upsert: async () => {},
+    bulkUpsert: async () => {},
     getAll: async () => [],
     updateCTR: async () => {},
 } as unknown as SearchTermRepo;

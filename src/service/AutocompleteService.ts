@@ -115,13 +115,15 @@ export class AutocompleteService {
     async ingest(logs: RawSearchLog[]): Promise<void> {
         this.pipeline.ingest(logs);
 
-        // persist each term to Postgres                                                                                                                   
+        // collect cleaned terms and persist in a single DB call
+        const termsToUpsert: SearchTerm[] = [];
         for (const log of logs) {
-            const term = this.trie.get(Cleaner.clean(log.query));                                                                                    
-            if (term) {                                                                                                                                    
-                await this.repo.upsert(term);
-            }                                                                                                                                              
-        } 
+            const term = this.trie.get(Cleaner.clean(log.query));
+            if (term && !termsToUpsert.some(t => t.term === term.term)) {
+                termsToUpsert.push(term);
+            }
+        }
+        await this.repo.bulkUpsert(termsToUpsert); 
 
         this.lruCache.clear();
         await this.redisCache.clear();

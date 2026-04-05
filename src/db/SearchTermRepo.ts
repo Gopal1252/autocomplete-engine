@@ -14,6 +14,30 @@ export class SearchTermRepo{
         );
     }
 
+    async bulkUpsert(terms: SearchTerm[]): Promise<void> {
+        if (terms.length === 0) return;
+
+        // Build: VALUES ($1,$2,$3,$4), ($5,$6,$7,$8), ...
+        const values: (string | number)[] = [];
+        const rows: string[] = [];
+
+        for (let i = 0; i < terms.length; i++) {
+            const offset = i * 4;
+            rows.push(`($${offset + 1}, $${offset + 2}, $${offset + 3}, $${offset + 4})`);
+            values.push(terms[i].term, terms[i].frequency, terms[i].lastUpdated, terms[i].clickThroughRate);
+        }
+
+        await getPool().query(
+            `INSERT INTO search_terms (term, frequency, last_updated, click_through_rate)
+            VALUES ${rows.join(', ')}
+            ON CONFLICT (term) DO UPDATE SET
+                frequency = EXCLUDED.frequency,
+                last_updated = EXCLUDED.last_updated,
+                click_through_rate = EXCLUDED.click_through_rate`,
+            values
+        );
+    }
+
     async getAll(): Promise<SearchTerm[]> {
         const result = await getPool().query("SELECT * FROM search_terms");
         return result.rows.map(row => ({                                                                                                                   
