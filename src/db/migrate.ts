@@ -1,4 +1,4 @@
-import pool from "./connection.js";
+import { getPool } from "./connection.js";
 import fs from "node:fs";
 import path from "node:path";
 
@@ -10,7 +10,7 @@ export async function migrate(): Promise<void> {
 
     for (const file of files) {
         const sql = fs.readFileSync(path.join(migrationsDir, file), "utf-8");
-        await pool.query(sql);
+        await getPool().query(sql);
         console.log(`Migration ran: ${file}`);
     }
 }

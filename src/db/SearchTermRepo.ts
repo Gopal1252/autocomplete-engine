@@ -1,9 +1,9 @@
-import pool from "./connection.js";
+import { getPool } from "./connection.js";
 import {SearchTerm} from "../core/types.js"
 
 export class SearchTermRepo{
     async upsert(term: SearchTerm): Promise<void>{
-        await pool.query(
+        await getPool().query(
             `INSERT INTO search_terms (term, frequency, last_updated, click_through_rate)
             VALUES ($1, $2, $3, $4)
             ON CONFLICT (term) DO UPDATE SET
@@ -15,7 +15,7 @@ export class SearchTermRepo{
     }
 
     async getAll(): Promise<SearchTerm[]> {
-        const result = await pool.query("SELECT * FROM search_terms");
+        const result = await getPool().query("SELECT * FROM search_terms");
         return result.rows.map(row => ({                                                                                                                   
             term: row.term,
             frequency: row.frequency,                                                                                                                      
@@ -25,7 +25,7 @@ export class SearchTermRepo{
     }
 
     async updateCTR(term: string, ctr: number): Promise<void> {
-        await pool.query(
+        await getPool().query(
             "UPDATE search_terms SET click_through_rate = $1 WHERE term = $2",
             [ctr, term]                                                                                                                                    
         );
