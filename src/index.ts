@@ -33,6 +33,10 @@ async function main() {
         host: process.env.REDIS_HOST,
         port: parseInt(process.env.REDIS_PORT!),
     });
+    redis.on('error', (err) => {                                                                                 
+        const msg = err.message || (err as AggregateError).errors?.[0]?.message || String(err);                  
+        console.error('[Redis]', msg);                                                                           
+    }); 
     const redisCache = new RedisCache(redis, 300); // 5 min TTL
 
     // create service and boot from DB
