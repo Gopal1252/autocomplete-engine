@@ -9,6 +9,7 @@ import { Redis } from "ioredis";
 import { migrate } from "./db/migrate.js";
 import { SearchTermRepo } from "./db/SearchTermRepo.js";
 import { RedisCache } from "./cache/RedisCache.js";
+import { getPool } from "./db/connection.js";
 
 const DEFAULT_CONFIG: AutocompleteConfig = {                                                                                                               
     maxSuggestions: 10,                                                                                                                                    
@@ -51,10 +52,27 @@ async function main() {
 
     // start server
     const PORT = 3000;
-    const server = createServer(service);
-    server.listen(PORT, () => {
+    const app = createServer(service);
+    const httpServer = app.listen(PORT, () => {
         console.log(`Autocomplete engine ready — ${service.getStats().totalTerms} terms indexed, listening on port ${PORT}`);
     });
+
+    // graceful shutdown
+    const shutdown = async (signal: string) => {
+        console.log(`${signal} received, shutting down...`);
+        const forceExit = setTimeout(() => {
+            console.error("Shutdown timed out, forcing exit");
+            process.exit(1);
+        }, 10_000);
+        httpServer.close(async () => {
+            await getPool().end();
+            await redis.quit();
+            clearTimeout(forceExit);
+            process.exit(0);
+        });
+    };
+    process.on('SIGTERM', () => shutdown('SIGTERM'));
+    process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
 main().catch(console.error); 
