@@ -37,5 +37,19 @@ export function createRoutes(service : AutocompleteService): Router{
         res.json(service.getStats());
     });
 
+    //health checkup endpoints
+    router.get('/health', (req, res) => {
+        res.json({status : "ok"})
+    });
+
+    router.get('/ready', async (req, res) => {
+        const checks = await service.healthCheck();
+        const healthy = checks.postgres === "ok" && checks.redis === "ok" && checks.booted;
+        res.status(healthy? 200 : 503).json({
+            status : healthy ? "ready" : "not ready",
+            checks
+        });
+    });
+
     return router;
 }

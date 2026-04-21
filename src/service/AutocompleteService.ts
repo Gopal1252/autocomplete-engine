@@ -8,6 +8,7 @@ import { Pipeline } from "../ingestion/Pipeline.js";
 import { Cleaner } from "../ingestion/Cleaner.js";
 import { SearchTermRepo } from "../db/SearchTermRepo.js";
 import { RedisCache } from "../cache/RedisCache.js";
+import { withTimeout } from "../utils/withTimeout.js";
 
 export class AutocompleteService {
     trie: Trie;
@@ -27,6 +28,8 @@ export class AutocompleteService {
     private l1Hits: number;
     private l2Hits: number;
     private totalQueries: number;
+
+    private booted = false;
 
     constructor(config: AutocompleteConfig, repo: SearchTermRepo, redisCache: RedisCache) {
         this.trie = new Trie();
@@ -55,6 +58,7 @@ export class AutocompleteService {
             this.trie.insert(term.term, term);
             this.bkTree.insert(term.term);
         }
+        this.booted = true;
         console.log(`Loaded ${terms.length} terms from database`);
     }
 
@@ -170,5 +174,24 @@ export class AutocompleteService {
             totalQueries: this.totalQueries,
             fuzzyEnabled: this.fuzzyEnabled
         };
+    }
+
+    //health check (pings Postgres and Redis)
+    async healthCheck(){
+        const checks = {postgres : "ok", redis: "ok", booted : this.booted};
+        try{
+            await withTimeout(this.repo.ping(), 2000, 'postgres');
+        }
+        catch(e){
+            checks.postgres = `error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+
+        try{
+            await withTimeout(this.redisCache.ping(), 2000, 'redis');
+        }
+        catch(e){
+            checks.redis = `error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        return checks;
     }
 }

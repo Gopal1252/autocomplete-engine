@@ -54,4 +54,9 @@ export class SearchTermRepo{
             [ctr, term]                                                                                                                                    
         );
     } 
+
+    //ping postgres
+    async ping() : Promise<void>{
+        await getPool().query("SELECT 1");
+    }
 }

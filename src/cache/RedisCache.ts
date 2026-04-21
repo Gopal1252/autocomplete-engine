@@ -26,5 +26,13 @@ export class RedisCache {
 
     async clear(): Promise<void> {
         await this.redis.flushdb();
-    }                                                                                                                                                      
+    }  
+    
+    //ping redisCache
+    async ping() : Promise<void>{
+        const result = await this.redis.ping();
+        if(result !== "PONG"){
+            throw new Error(`unexpected: ${result}`);
+        }
+    }
 }

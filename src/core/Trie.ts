@@ -5,7 +5,7 @@ export class Trie{
     root: TrieNode;
     count: number;
 
-    constructor(){
+    constructor(){ 
         this.root = new TrieNode();
         this.count = 0;
     }
