@@ -3,6 +3,9 @@ import cors from "cors";
 import compression from "compression";
 import { AutocompleteService } from "../service/AutocompleteService.js";
 import { createRoutes } from "./routes.js";
+import { createLogger } from "../utils/logger.js";
+
+const log = createLogger('Server');
 
 export function createServer(service: AutocompleteService) {
     const app = express();
@@ -16,7 +19,7 @@ export function createServer(service: AutocompleteService) {
 
     //error handling
     app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
-        console.error(err.message);
+        log.error(err.message);
         res.status(500).json({ error: 'Internal server error' });
     });
 

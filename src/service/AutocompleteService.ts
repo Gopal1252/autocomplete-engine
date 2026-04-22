@@ -9,6 +9,9 @@ import { Cleaner } from "../ingestion/Cleaner.js";
 import { SearchTermRepo } from "../db/SearchTermRepo.js";
 import { RedisCache } from "../cache/RedisCache.js";
 import { withTimeout } from "../utils/withTimeout.js";
+import { createLogger } from "../utils/logger.js";
+
+const log = createLogger('Service');
 
 export class AutocompleteService {
     trie: Trie;
@@ -59,7 +62,7 @@ export class AutocompleteService {
             this.bkTree.insert(term.term);
         }
         this.booted = true;
-        console.log(`Loaded ${terms.length} terms from database`);
+        log.info(`Loaded ${terms.length} terms from database`);
     }
 
     async getSuggestions(prefix: string, n?: number): Promise<ScoredSuggestion[]> {

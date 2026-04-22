@@ -10,6 +10,10 @@ import { migrate } from "./db/migrate.js";
 import { SearchTermRepo } from "./db/SearchTermRepo.js";
 import { RedisCache } from "./cache/RedisCache.js";
 import { getPool } from "./db/connection.js";
+import { createLogger } from "./utils/logger.js";
+
+const log = createLogger('Server');
+const redisLog = createLogger('Redis');
 
 const DEFAULT_CONFIG: AutocompleteConfig = {                                                                                                               
     maxSuggestions: 10,                                                                                                                                    
@@ -34,10 +38,10 @@ async function main() {
         host: process.env.REDIS_HOST,
         port: parseInt(process.env.REDIS_PORT!),
     });
-    redis.on('error', (err) => {                                                                                 
-        const msg = err.message || (err as AggregateError).errors?.[0]?.message || String(err);                  
-        console.error('[Redis]', msg);                                                                           
-    }); 
+    redis.on('error', (err) => {
+        const msg = err.message || (err as AggregateError).errors?.[0]?.message || String(err);
+        redisLog.error(msg);
+    });
     const redisCache = new RedisCache(redis, 300); // 5 min TTL
 
     // create service and boot from DB
@@ -46,7 +50,7 @@ async function main() {
 
     // seed DB on first run if empty
     if (service.getStats().totalTerms === 0) {
-        console.log("No terms in database, ingesting seed data...");
+        log.info("No terms in database, ingesting seed data...");
         await service.ingest(seedData);
     }
 
@@ -54,14 +58,18 @@ async function main() {
     const PORT = 3000;
     const app = createServer(service);
     const httpServer = app.listen(PORT, () => {
-        console.log(`Autocomplete engine ready — ${service.getStats().totalTerms} terms indexed, listening on port ${PORT}`);
+        log.info(`Autocomplete engine ready — ${service.getStats().totalTerms} terms indexed, listening on port ${PORT}`);
     });
 
     // graceful shutdown
+    let shuttingDown = false;
     const shutdown = async (signal: string) => {
-        console.log(`${signal} received, shutting down...`);
+        if (shuttingDown) return;
+        shuttingDown = true;
+
+        log.info(`${signal} received, shutting down...`);
         const forceExit = setTimeout(() => {
-            console.error("Shutdown timed out, forcing exit");
+            log.error("Shutdown timed out, forcing exit");
             process.exit(1);
         }, 10_000);
         httpServer.close(async () => {
@@ -75,4 +83,4 @@ async function main() {
     process.on('SIGINT', () => shutdown('SIGINT'));
 }
 
-main().catch(console.error); 
+main().catch((e) => log.error(e instanceof Error ? e.message : String(e)));
