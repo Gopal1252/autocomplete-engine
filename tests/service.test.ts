@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { AutocompleteService } from '../src/service/AutocompleteService.js';
 import { AutocompleteConfig, ScoredSuggestion } from '../src/core/types.js';
 import { SearchTermRepo } from '../src/db/SearchTermRepo.js';
+import { BlocklistRepo } from '../src/db/BlocklistRepo.js';
 import { RedisCache } from '../src/cache/RedisCache.js';
 
 const now = Date.now();
@@ -26,7 +27,24 @@ const mockRepo = {
     bulkUpsert: async () => {},
     getAll: async () => [],
     updateCTR: async () => {},
+    delete: async () => {},
+    deleteAll: async () => {},
+    ping: async () => {},
 } as unknown as SearchTermRepo;
+
+// Mock blocklist repo — in-memory Set stand-in
+function createMockBlocklistRepo(): BlocklistRepo {
+    const store = new Set<string>();
+    return {
+        add: async (terms: string[]) => { for (const t of terms) store.add(t); },
+        getAll: async () => Array.from(store),
+        remove: async (term: string) => {
+            const had = store.has(term);
+            store.delete(term);
+            return had;
+        },
+    } as unknown as BlocklistRepo;
+}
 
 // Mock Redis cache — in-memory stand-in
 function createMockRedisCache(): RedisCache {
@@ -41,6 +59,7 @@ function createMockRedisCache(): RedisCache {
         },
         delete: async (key: string) => { store.delete(key); },
         clear: async () => { store.clear(); },
+        ping: async () => {},
     } as unknown as RedisCache;
 }
 
@@ -49,6 +68,7 @@ function createService(configOverrides?: Partial<AutocompleteConfig>): Autocompl
         { ...defaultConfig, ...configOverrides },
         mockRepo,
         createMockRedisCache(),
+        createMockBlocklistRepo(),
     );
 }
 
@@ -322,5 +342,198 @@ describe('AutocompleteService - getStats', () => {
         expect(stats.l1Hits).toBe(1);
         expect(stats.totalCacheHits).toBe(1);
         expect(stats.cacheHitRate).toBe(0.5);
+    });
+});
+
+describe('AutocompleteService - getTerm', () => {
+    let service: AutocompleteService;
+
+    beforeEach(async () => {
+        service = createService();
+        await seedService(service);
+    });
+
+    it('should return an existing term with metadata', () => {
+        const term = service.getTerm('spotify');
+        expect(term).not.toBeNull();
+        expect(term!.term).toBe('spotify');
+        expect(term!.frequency).toBeGreaterThan(0);
+    });
+
+    it('should return null for a non-existent term', () => {
+        expect(service.getTerm('nonexistent')).toBeNull();
+    });
+
+    it('should normalize the lookup via Cleaner', () => {
+        const term = service.getTerm('  SPOTIFY!!  ');
+        expect(term).not.toBeNull();
+        expect(term!.term).toBe('spotify');
+    });
+});
+
+describe('AutocompleteService - putTerm', () => {
+    let service: AutocompleteService;
+
+    beforeEach(() => {
+        service = createService();
+    });
+
+    it('should create a new term and make it searchable', async () => {
+        const entry = await service.putTerm('brandnew', { frequency: 50 });
+        expect(entry.term).toBe('brandnew');
+        expect(entry.frequency).toBe(50);
+
+        const results = await service.getSuggestions('bra');
+        expect(results.map(r => r.term)).toContain('brandnew');
+    });
+
+    it('should use defaults when metadata is omitted for a new term', async () => {
+        const entry = await service.putTerm('fresh', {});
+        expect(entry.frequency).toBe(1);
+        expect(entry.clickThroughRate).toBe(0);
+    });
+
+    it('should preserve existing metadata when fields are omitted on update', async () => {
+        await service.putTerm('preserved', { frequency: 100, clickThroughRate: 0.5 });
+        const updated = await service.putTerm('preserved', { frequency: 200 });
+        expect(updated.frequency).toBe(200);
+        expect(updated.clickThroughRate).toBe(0.5); // untouched
+    });
+
+    it('should normalize term via Cleaner', async () => {
+        const entry = await service.putTerm('  HELLO World!  ', {});
+        expect(entry.term).toBe('hello world');
+    });
+
+    it('should reject invalid terms', async () => {
+        await expect(service.putTerm('a', {})).rejects.toThrow('Invalid term');
+    });
+
+    it('should invalidate cache after put', async () => {
+        await service.ingest([{ query: 'spotify', timestamp: now }]);
+        await service.getSuggestions('spo'); // cache populated
+        await service.putTerm('spongebob', { frequency: 10 });
+        const results = await service.getSuggestions('spo');
+        expect(results.map(r => r.term)).toContain('spongebob');
+    });
+});
+
+describe('AutocompleteService - deleteTerm', () => {
+    let service: AutocompleteService;
+
+    beforeEach(async () => {
+        service = createService();
+        await seedService(service);
+    });
+
+    it('should remove the term from search results', async () => {
+        const before = await service.getSuggestions('spo');
+        expect(before.map(r => r.term)).toContain('spotify');
+
+        const deleted = await service.deleteTerm('spotify');
+        expect(deleted).toBe(true);
+
+        const after = await service.getSuggestions('spo');
+        expect(after.map(r => r.term)).not.toContain('spotify');
+    });
+
+    it('should return false for a non-existent term', async () => {
+        const deleted = await service.deleteTerm('nonexistent');
+        expect(deleted).toBe(false);
+    });
+
+    it('should reject invalid terms', async () => {
+        await expect(service.deleteTerm('a')).rejects.toThrow('Invalid term');
+    });
+});
+
+describe('AutocompleteService - deleteAllTerms', () => {
+    let service: AutocompleteService;
+
+    beforeEach(async () => {
+        service = createService();
+        await seedService(service);
+    });
+
+    it('should return the number of terms that were deleted', async () => {
+        const before = service.getStats().totalTerms;
+        const count = await service.deleteAllTerms();
+        expect(count).toBe(before);
+    });
+
+    it('should leave the service empty and searchable', async () => {
+        await service.deleteAllTerms();
+        expect(service.getStats().totalTerms).toBe(0);
+        const results = await service.getSuggestions('spo');
+        expect(results).toEqual([]);
+    });
+
+    it('should allow new ingests to flow into the fresh trie (Pipeline rewired)', async () => {
+        await service.deleteAllTerms();
+        await service.ingest([{ query: 'postreset', timestamp: now }]);
+        const results = await service.getSuggestions('post');
+        expect(results.map(r => r.term)).toContain('postreset');
+    });
+});
+
+describe('AutocompleteService - blocklist', () => {
+    let service: AutocompleteService;
+
+    beforeEach(async () => {
+        service = createService();
+        await seedService(service);
+    });
+
+    it('should filter blocked terms from suggestions', async () => {
+        await service.addToBlocklist(['spotify']);
+        const results = await service.getSuggestions('spo');
+        expect(results.map(r => r.term)).not.toContain('spotify');
+    });
+
+    it('should still return N results when a blocked term is in the raw top (filter-before-slice)', async () => {
+        await service.addToBlocklist(['spotify']);
+        const results = await service.getSuggestions('spo', 2);
+        // two remaining spo-prefixed terms: "sports news" and "spongebob"
+        expect(results.length).toBe(2);
+        expect(results.map(r => r.term)).not.toContain('spotify');
+    });
+
+    it('should normalize terms when blocking', async () => {
+        await service.addToBlocklist(['  SPOTIFY!  ']);
+        const list = service.getBlocklist();
+        expect(list).toContain('spotify');
+    });
+
+    it('should invalidate cache on add (blocked term should vanish immediately)', async () => {
+        await service.getSuggestions('spo'); // populate cache (includes spotify)
+        await service.addToBlocklist(['spotify']);
+        const results = await service.getSuggestions('spo');
+        expect(results.map(r => r.term)).not.toContain('spotify');
+    });
+
+    it('should allow unblocking a term', async () => {
+        await service.addToBlocklist(['spotify']);
+        const removed = await service.removeFromBlocklist('spotify');
+        expect(removed).toBe(true);
+
+        const results = await service.getSuggestions('spo');
+        expect(results.map(r => r.term)).toContain('spotify');
+    });
+
+    it('should return false when unblocking a term not on the list', async () => {
+        const removed = await service.removeFromBlocklist('nonexistent');
+        expect(removed).toBe(false);
+    });
+
+    it('should report current blocklist via getBlocklist()', async () => {
+        await service.addToBlocklist(['one', 'two']);
+        const list = service.getBlocklist();
+        expect(list.sort()).toEqual(['one', 'two']);
+    });
+
+    it('should skip invalid terms when adding (returns 0 if all invalid)', async () => {
+        const count = await service.addToBlocklist(['a', 'x']); // both below minLen
+        expect(count).toBe(0);
+        expect(service.getBlocklist()).toEqual([]);
     });
 });
