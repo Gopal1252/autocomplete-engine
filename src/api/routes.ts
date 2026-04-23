@@ -1,7 +1,7 @@
 import express, { Router } from "express";
 import { z } from "zod";
 import { AutocompleteService } from "../service/AutocompleteService.js";
-import { IngestSchema, EventSchema, AutocompleteQuerySchema, PutTermSchema } from "./schemas.js";
+import { IngestSchema, EventSchema, AutocompleteQuerySchema, PutTermSchema, BlocklistPostSchema } from "./schemas.js";
 import { error } from "console";
 
 // validate data against a zod schema; on failure send 400 and return null
@@ -101,6 +101,29 @@ export function createRoutes(service: AutocompleteService): Router {
     router.delete('/terms', async (req, res) => {
         const count = await service.deleteAllTerms();
         res.json({ deleted: 'all', count });
+    });
+
+    router.get('/blocklist', (_req, res) => {
+        const terms = service.getBlocklist();
+        res.json({ terms, count: terms.length });
+    });
+
+    router.post('/blocklist', async (req, res) => {
+        const body = parse(BlocklistPostSchema, req.body, res);
+        if (!body) return;
+
+        const blocked = await service.addToBlocklist(body.terms);
+        res.json({ blocked });
+    });
+
+    router.delete('/blocklist/:term', async (req, res) => {
+        const term = decodeURIComponent(req.params.term);
+        const removed = await service.removeFromBlocklist(term);
+        if (!removed) {
+            res.status(404).json({ error: 'Term not found in blocklist' });
+            return;
+        }
+        res.json({ unblocked: term });
     });
 
     return router;

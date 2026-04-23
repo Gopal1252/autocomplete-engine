@@ -8,6 +8,7 @@ import { seedData } from "./data/seed.js";
 import { Redis } from "ioredis";
 import { migrate } from "./db/migrate.js";
 import { SearchTermRepo } from "./db/SearchTermRepo.js";
+import { BlocklistRepo } from "./db/BlocklistRepo.js";
 import { RedisCache } from "./cache/RedisCache.js";
 import { getPool } from "./db/connection.js";
 import { createLogger } from "./utils/logger.js";
@@ -34,6 +35,7 @@ async function main() {
 
     // create dependencies
     const repo = new SearchTermRepo();
+    const blocklistRepo = new BlocklistRepo();
     const redis = new Redis({
         host: process.env.REDIS_HOST,
         port: parseInt(process.env.REDIS_PORT!),
@@ -45,7 +47,7 @@ async function main() {
     const redisCache = new RedisCache(redis, 300); // 5 min TTL
 
     // create service and boot from DB
-    const service = new AutocompleteService(DEFAULT_CONFIG, repo, redisCache);
+    const service = new AutocompleteService(DEFAULT_CONFIG, repo, redisCache, blocklistRepo);
     await service.boot();
 
     // seed DB on first run if empty

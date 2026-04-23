@@ -28,3 +28,8 @@ export const PutTermSchema = z.object({
     frequency: z.number().int().positive().optional(),
     clickThroughRate: z.number().min(0).max(1).optional(),
 });
+
+// POST /blocklist
+export const BlocklistPostSchema = z.object({
+    terms: z.array(z.string().min(1)).min(1),
+});

@@ -7,6 +7,7 @@ import { levenshteinDistance } from "../fuzzy/Levenshtein.js";
 import { Pipeline } from "../ingestion/Pipeline.js";
 import { Cleaner } from "../ingestion/Cleaner.js";
 import { SearchTermRepo } from "../db/SearchTermRepo.js";
+import { BlocklistRepo } from "../db/BlocklistRepo.js";
 import { RedisCache } from "../cache/RedisCache.js";
 import { withTimeout } from "../utils/withTimeout.js";
 import { createLogger } from "../utils/logger.js";
@@ -24,6 +25,8 @@ export class AutocompleteService {
     pipeline: Pipeline;
     redisCache : RedisCache;
     repo : SearchTermRepo;
+    blocklistRepo: BlocklistRepo;
+    private blocklist: Set<string>;
 
     private impressions: Map<string, number>;
     private clicks: Map<string, number>;
@@ -34,7 +37,7 @@ export class AutocompleteService {
 
     private booted = false;
 
-    constructor(config: AutocompleteConfig, repo: SearchTermRepo, redisCache: RedisCache) {
+    constructor(config: AutocompleteConfig, repo: SearchTermRepo, redisCache: RedisCache, blocklistRepo: BlocklistRepo) {
         this.trie = new Trie();
         this.lruCache = new LRUCache<string, ScoredSuggestion[]>(config.cacheMaxSize, config.cacheTTLMs);
         this.ranker = new Ranker(config.rankingWeights);
@@ -45,6 +48,8 @@ export class AutocompleteService {
         this.pipeline = new Pipeline(this.trie, this.bkTree);
         this.redisCache = redisCache;
         this.repo = repo;
+        this.blocklistRepo = blocklistRepo;
+        this.blocklist = new Set<string>();
 
         this.impressions = new Map<string, number>();
         this.clicks = new Map<string, number>();
@@ -61,8 +66,12 @@ export class AutocompleteService {
             this.trie.insert(term.term, term);
             this.bkTree.insert(term.term);
         }
+        const blocked = await this.blocklistRepo.getAll();
+        for(const t of blocked){
+            this.blocklist.add(t);
+        }
         this.booted = true;
-        log.info(`Loaded ${terms.length} terms from database`);
+        log.info(`Loaded ${terms.length} terms and ${blocked.length} blocked terms from database`);
     }
 
     async getSuggestions(prefix: string, n?: number): Promise<ScoredSuggestion[]> {
@@ -108,9 +117,12 @@ export class AutocompleteService {
 
         //rank the suggestions
         const scoredSuggestions = this.ranker.rank(uniqueSuggestions);
-        
+
+        //filter out blocked terms after ranking, before slicing top N
+        const filtered = scoredSuggestions.filter(s => !this.blocklist.has(s.term));
+
         //take the top N suggestions
-        const topSuggestions = scoredSuggestions.slice(0, requiredSuggestions);
+        const topSuggestions = filtered.slice(0, requiredSuggestions);
 
         //cache in both L1 and L2
         this.lruCache.set(searchTerm, topSuggestions);
@@ -251,5 +263,39 @@ export class AutocompleteService {
         this.lruCache.clear();
         await this.redisCache.clear();
         return count;
+    }
+
+    async addToBlocklist(terms: string[]): Promise<number> {
+        const normalized = terms
+            .map(t => Cleaner.clean(t))
+            .filter(t => Cleaner.isValid(t));
+
+        if (normalized.length === 0) return 0;
+
+        await this.blocklistRepo.add(normalized);
+        for (const t of normalized) {
+            this.blocklist.add(t);
+        }
+
+        this.lruCache.clear();
+        await this.redisCache.clear();
+        return normalized.length;
+    }
+
+    async removeFromBlocklist(term: string): Promise<boolean> {
+        const cleaned = Cleaner.clean(term);
+        if (!Cleaner.isValid(cleaned)) return false;
+
+        const removed = await this.blocklistRepo.remove(cleaned);
+        if (!removed) return false;
+
+        this.blocklist.delete(cleaned);
+        this.lruCache.clear();
+        await this.redisCache.clear();
+        return true;
+    }
+
+    getBlocklist(): string[] {
+        return Array.from(this.blocklist);
     }
 }
