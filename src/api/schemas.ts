@@ -22,3 +22,9 @@ export const AutocompleteQuerySchema = z.object({
     q: z.string().min(1),
     n: z.coerce.number().int().positive().optional(),
 });
+
+//zod schema for put
+export const PutTermSchema = z.object({
+    frequency: z.number().int().positive().optional(),
+    clickThroughRate: z.number().min(0).max(1).optional(),
+});

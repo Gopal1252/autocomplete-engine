@@ -197,4 +197,59 @@ export class AutocompleteService {
         }
         return checks;
     }
+
+    getTerm(term: string): SearchTerm | null{
+        const cleaned = Cleaner.clean(term);
+        return this.trie.get(cleaned);
+    }
+
+    async putTerm(term : string, metadata : {frequency?: number; clickThroughRate?: number}): Promise<SearchTerm> {
+        const cleaned = Cleaner.clean(term);
+        if (!Cleaner.isValid(cleaned)) throw new Error('Invalid term');
+
+        const existing = this.trie.get(cleaned);
+        const entry: SearchTerm = {
+            term: cleaned,
+            frequency: metadata.frequency ?? existing?.frequency ?? 1,
+            clickThroughRate: metadata.clickThroughRate ?? existing?.clickThroughRate ?? 0,
+            lastUpdated: Date.now(),
+        };
+
+        const wasNew = !existing;
+        this.trie.insert(cleaned, entry);
+        if(wasNew) this.bkTree.insert(cleaned);
+        await this.repo.upsert(entry);
+
+        this.lruCache.clear();
+        await this.redisCache.clear();
+        return entry;
+    }
+
+    async deleteTerm(term : string): Promise<boolean> {
+        const cleaned = Cleaner.clean(term);
+        if (!Cleaner.isValid(cleaned)) throw new Error('Invalid term');
+
+        const existed = this.trie.delete(cleaned);
+        if(!existed) return false;
+
+        await this.repo.delete(cleaned);
+        this.lruCache.clear();
+        await this.redisCache.clear();
+        // Note: BK-tree doesn't support deletion — term may still suggest as fuzzy match,
+        // but with no trie entry it'll yield no suggestions.
+        return true;
+    }
+
+    async deleteAllTerms(): Promise<number>{
+        const count = this.trie.count;
+        this.trie = new Trie();
+        this.bkTree = new BKTree(levenshteinDistance);
+        this.pipeline = new Pipeline(this.trie, this.bkTree);
+        this.impressions.clear();
+        this.clicks.clear();
+        await this.repo.deleteAll();
+        this.lruCache.clear();
+        await this.redisCache.clear();
+        return count;
+    }
 }

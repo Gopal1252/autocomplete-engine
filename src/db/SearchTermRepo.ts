@@ -59,4 +59,14 @@ export class SearchTermRepo{
     async ping() : Promise<void>{
         await getPool().query("SELECT 1");
     }
+
+    //delete endpoint to delete a single term
+    async delete(term : string): Promise<void>{
+        await getPool().query("DELETE FROM search_terms WHERE term = $1", [term]);
+    }
+
+    //delete all terms in the database
+    async deleteAll(): Promise<void>{
+        await getPool().query("DELETE FROM search_terms");
+    }
 }

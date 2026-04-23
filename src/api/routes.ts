@@ -1,7 +1,8 @@
 import express, { Router } from "express";
 import { z } from "zod";
 import { AutocompleteService } from "../service/AutocompleteService.js";
-import { IngestSchema, EventSchema, AutocompleteQuerySchema } from "./schemas.js";
+import { IngestSchema, EventSchema, AutocompleteQuerySchema, PutTermSchema } from "./schemas.js";
+import { error } from "console";
 
 // validate data against a zod schema; on failure send 400 and return null
 function parse<T>(schema: z.ZodType<T>, data: unknown, res: express.Response): T | null {
@@ -62,6 +63,44 @@ export function createRoutes(service: AutocompleteService): Router {
             status: healthy ? "ready" : "not ready",
             checks
         });
+    });
+
+    router.get('/terms/:term', (req,res) => {
+        const term = decodeURIComponent(req.params.term);
+        const result = service.getTerm(term);
+        if(!result){
+            res.status(404).json({error : 'Term not found'});
+            return;
+        }
+        res.json(result);
+    });
+
+    router.put('/terms/:term', async (req, res) => {
+        const term = decodeURIComponent(req.params.term);
+        const body = parse(PutTermSchema, req.body, res);
+        if(!body) return;
+
+        try{
+            const entry = await service.putTerm(term, body);
+            res.json(entry);
+        }catch(e){
+            res.status(400).json({error: e instanceof Error ? e.message : String(e)});
+        }
+    });
+
+    router.delete('/terms/:term', async (req, res) => {
+        const term = decodeURIComponent(req.params.term);
+        const deleted = await service.deleteTerm(term);
+        if (!deleted) {
+            res.status(404).json({ error: 'Term not found' });
+            return;
+        }
+        res.json({ deleted: term });
+    });
+
+    router.delete('/terms', async (req, res) => {
+        const count = await service.deleteAllTerms();
+        res.json({ deleted: 'all', count });
     });
 
     return router;
