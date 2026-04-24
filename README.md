@@ -53,6 +53,7 @@ curl "http://localhost:3000/autocomplete?q=spo&n=5"
 - `POST /event` — record impression/click events (feeds CTR ranking)
 
 ### Term management
+- `GET /terms` — list all terms (`{ terms, count }`)
 - `GET /terms/:term` — fetch a single term's metadata
 - `PUT /terms/:term` — create or update a term with explicit frequency / CTR
 - `DELETE /terms/:term` — remove a term
@@ -76,6 +77,8 @@ curl -X POST http://localhost:3000/ingest \
 ```
 
 Request bodies are validated with [zod](https://zod.dev); invalid input returns 400 with details.
+
+`GET /autocomplete` response includes a `meta` block with `queryTimeMs`, `fromCache`, and `cacheTier` (`"L1"` / `"L2"` / `"miss"`) so clients can observe which layer served the result.
 
 ## Running Tests
 
