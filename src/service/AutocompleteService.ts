@@ -74,7 +74,7 @@ export class AutocompleteService {
         log.info(`Loaded ${terms.length} terms and ${blocked.length} blocked terms from database`);
     }
 
-    async getSuggestions(prefix: string, n?: number): Promise<ScoredSuggestion[]> {
+    async getSuggestions(prefix: string, n?: number): Promise<{ suggestions: ScoredSuggestion[]; tier: 'L1' | 'L2' | 'miss' }> {
         const searchTerm = prefix.toLowerCase().trim();
         const requiredSuggestions = n ?? this.maxSuggestions;
         this.totalQueries++;
@@ -82,7 +82,7 @@ export class AutocompleteService {
         //L1: in-memory LRU cache
         if(this.lruCache.has(searchTerm)){
             this.l1Hits++;
-            return this.lruCache.get(searchTerm)!;
+            return { suggestions: this.lruCache.get(searchTerm)!, tier: 'L1' };
         }
 
         //L2: Redis cache
@@ -90,8 +90,8 @@ export class AutocompleteService {
         if(redisResult){
             this.l2Hits++;
             this.lruCache.set(searchTerm, redisResult); // promote to L1
-            return redisResult;
-        } 
+            return { suggestions: redisResult, tier: 'L2' };
+        }
 
         const suggestions : SearchTerm[] = this.trie.getAllWithPrefix(searchTerm);
 
@@ -128,7 +128,7 @@ export class AutocompleteService {
         this.lruCache.set(searchTerm, topSuggestions);
         await this.redisCache.set(searchTerm, topSuggestions);
 
-        return topSuggestions;
+        return { suggestions: topSuggestions, tier: 'miss' };
     }
 
     async ingest(logs: RawSearchLog[]): Promise<void> {

@@ -22,13 +22,11 @@ export function createRoutes(service: AutocompleteService): Router {
         if (!query) return;
         const { q, n } = query;
 
-        const hitsBefore = service.getStats().totalCacheHits;
         const start = performance.now();
-        const suggestions = await service.getSuggestions(q, n);
+        const { suggestions, tier } = await service.getSuggestions(q, n);
         const queryTimeMs = parseFloat((performance.now() - start).toFixed(3));
-        const fromCache = service.getStats().totalCacheHits > hitsBefore;
 
-        res.json({ suggestions, meta: { queryTimeMs, fromCache } });
+        res.json({ suggestions, meta: { queryTimeMs, fromCache: tier !== 'miss', cacheTier: tier } });
     });
 
     router.post('/ingest', async (req, res) => {
@@ -47,16 +45,16 @@ export function createRoutes(service: AutocompleteService): Router {
         res.json({ ok: true });
     });
 
-    router.get('/stats', (req, res) => {
+    router.get('/stats', (_req, res) => {
         res.json(service.getStats());
     });
 
     //health checkup endpoints
-    router.get('/health', (req, res) => {
+    router.get('/health', (_req, res) => {
         res.json({ status: "ok" });
     });
 
-    router.get('/ready', async (req, res) => {
+    router.get('/ready', async (_req, res) => {
         const checks = await service.healthCheck();
         const healthy = checks.postgres === "ok" && checks.redis === "ok" && checks.booted;
         res.status(healthy ? 200 : 503).json({
@@ -103,7 +101,7 @@ export function createRoutes(service: AutocompleteService): Router {
         res.json({ deleted: term });
     });
 
-    router.delete('/terms', async (req, res) => {
+    router.delete('/terms', async (_req, res) => {
         const count = await service.deleteAllTerms();
         res.json({ deleted: 'all', count });
     });

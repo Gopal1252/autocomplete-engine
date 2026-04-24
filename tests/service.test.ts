@@ -95,7 +95,7 @@ describe('AutocompleteService - getSuggestions', () => {
     });
 
     it('should return suggestions for a valid prefix', async () => {
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results.length).toBeGreaterThan(0);
         for (const r of results) {
             expect(r.term.startsWith('spo')).toBe(true);
@@ -103,19 +103,19 @@ describe('AutocompleteService - getSuggestions', () => {
     });
 
     it('should return results sorted by score descending', async () => {
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         for (let i = 1; i < results.length; i++) {
             expect(results[i - 1].score).toBeGreaterThanOrEqual(results[i].score);
         }
     });
 
     it('should return empty array for a prefix with no matches', async () => {
-        const results = await service.getSuggestions('xyz');
+        const { suggestions: results } = await service.getSuggestions('xyz');
         expect(results).toEqual([]);
     });
 
     it('should normalize the prefix (lowercase, trim)', async () => {
-        const results = await service.getSuggestions('  SPO  ');
+        const { suggestions: results } = await service.getSuggestions('  SPO  ');
         expect(results.length).toBeGreaterThan(0);
         for (const r of results) {
             expect(r.term.startsWith('spo')).toBe(true);
@@ -123,21 +123,26 @@ describe('AutocompleteService - getSuggestions', () => {
     });
 
     it('should respect the n parameter', async () => {
-        const results = await service.getSuggestions('spo', 1);
+        const { suggestions: results } = await service.getSuggestions('spo', 1);
         expect(results).toHaveLength(1);
     });
 
     it('should use maxSuggestions from config when n is not provided', async () => {
         const service2 = createService({ maxSuggestions: 2 });
         await seedService(service2);
-        const results = await service2.getSuggestions('spo');
+        const { suggestions: results } = await service2.getSuggestions('spo');
         expect(results.length).toBeLessThanOrEqual(2);
     });
 
     it('should return fewer than n if not enough matches exist', async () => {
-        const results = await service.getSuggestions('goo', 10);
+        const { suggestions: results } = await service.getSuggestions('goo', 10);
         expect(results.length).toBeLessThan(10);
         expect(results.length).toBeGreaterThan(0);
+    });
+
+    it('should report cacheTier "miss" on first lookup', async () => {
+        const { tier } = await service.getSuggestions('spo');
+        expect(tier).toBe('miss');
     });
 });
 
@@ -152,7 +157,8 @@ describe('AutocompleteService - caching', () => {
     it('should cache results in L1 and return from L1 on second call', async () => {
         const first = await service.getSuggestions('spo');
         const second = await service.getSuggestions('spo');
-        expect(second).toEqual(first);
+        expect(second.suggestions).toEqual(first.suggestions);
+        expect(second.tier).toBe('L1');
         expect(service.getStats().l1Hits).toBe(1);
     });
 
@@ -172,11 +178,14 @@ describe('AutocompleteService - caching', () => {
     });
 
     it('should promote L2 hit to L1', async () => {
-        await service.getSuggestions('spo'); // miss — caches in L1 + L2
+        const first = await service.getSuggestions('spo'); // miss — caches in L1 + L2
+        expect(first.tier).toBe('miss');
         service.lruCache.clear(); // clear L1 only
-        await service.getSuggestions('spo'); // L2 hit, promoted to L1
+        const second = await service.getSuggestions('spo'); // L2 hit, promoted to L1
+        expect(second.tier).toBe('L2');
         expect(service.getStats().l2Hits).toBe(1);
-        await service.getSuggestions('spo'); // now L1 hit
+        const third = await service.getSuggestions('spo'); // now L1 hit
+        expect(third.tier).toBe('L1');
         expect(service.getStats().l1Hits).toBe(1);
     });
 });
@@ -190,7 +199,7 @@ describe('AutocompleteService - ingest', () => {
 
     it('should make ingested terms searchable', async () => {
         await service.ingest([{ query: 'typescript', timestamp: now }]);
-        const results = await service.getSuggestions('type');
+        const { suggestions: results } = await service.getSuggestions('type');
         expect(results.length).toBe(1);
         expect(results[0].term).toBe('typescript');
     });
@@ -199,7 +208,7 @@ describe('AutocompleteService - ingest', () => {
         await service.ingest([{ query: 'spotify', timestamp: now }]);
         await service.getSuggestions('spo'); // cached
         await service.ingest([{ query: 'spongebob', timestamp: now }]);
-        const results = await service.getSuggestions('spo'); // should not be from old cache
+        const { suggestions: results } = await service.getSuggestions('spo'); // should not be from old cache
         const terms = results.map(r => r.term);
         expect(terms).toContain('spongebob');
     });
@@ -232,7 +241,7 @@ describe('AutocompleteService - fuzzy matching', () => {
     });
 
     it('should return fuzzy matches for typos', async () => {
-        const results = await service.getSuggestions('spotifu');
+        const { suggestions: results } = await service.getSuggestions('spotifu');
         const terms = results.map(r => r.term);
         expect(terms).toContain('spotify');
     });
@@ -240,12 +249,12 @@ describe('AutocompleteService - fuzzy matching', () => {
     it('should not return fuzzy matches when fuzzy is disabled', async () => {
         const service2 = createService({ fuzzyEnabled: false });
         await seedService(service2);
-        const results = await service2.getSuggestions('spotifu');
+        const { suggestions: results } = await service2.getSuggestions('spotifu');
         expect(results).toEqual([]);
     });
 
     it('should deduplicate results from trie and fuzzy', async () => {
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         const termNames = results.map(r => r.term);
         const uniqueTerms = new Set(termNames);
         expect(termNames.length).toBe(uniqueTerms.size);
@@ -383,7 +392,7 @@ describe('AutocompleteService - putTerm', () => {
         expect(entry.term).toBe('brandnew');
         expect(entry.frequency).toBe(50);
 
-        const results = await service.getSuggestions('bra');
+        const { suggestions: results } = await service.getSuggestions('bra');
         expect(results.map(r => r.term)).toContain('brandnew');
     });
 
@@ -413,7 +422,7 @@ describe('AutocompleteService - putTerm', () => {
         await service.ingest([{ query: 'spotify', timestamp: now }]);
         await service.getSuggestions('spo'); // cache populated
         await service.putTerm('spongebob', { frequency: 10 });
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results.map(r => r.term)).toContain('spongebob');
     });
 });
@@ -427,13 +436,13 @@ describe('AutocompleteService - deleteTerm', () => {
     });
 
     it('should remove the term from search results', async () => {
-        const before = await service.getSuggestions('spo');
+        const { suggestions: before } = await service.getSuggestions('spo');
         expect(before.map(r => r.term)).toContain('spotify');
 
         const deleted = await service.deleteTerm('spotify');
         expect(deleted).toBe(true);
 
-        const after = await service.getSuggestions('spo');
+        const { suggestions: after } = await service.getSuggestions('spo');
         expect(after.map(r => r.term)).not.toContain('spotify');
     });
 
@@ -464,14 +473,14 @@ describe('AutocompleteService - deleteAllTerms', () => {
     it('should leave the service empty and searchable', async () => {
         await service.deleteAllTerms();
         expect(service.getStats().totalTerms).toBe(0);
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results).toEqual([]);
     });
 
     it('should allow new ingests to flow into the fresh trie (Pipeline rewired)', async () => {
         await service.deleteAllTerms();
         await service.ingest([{ query: 'postreset', timestamp: now }]);
-        const results = await service.getSuggestions('post');
+        const { suggestions: results } = await service.getSuggestions('post');
         expect(results.map(r => r.term)).toContain('postreset');
     });
 });
@@ -486,13 +495,13 @@ describe('AutocompleteService - blocklist', () => {
 
     it('should filter blocked terms from suggestions', async () => {
         await service.addToBlocklist(['spotify']);
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results.map(r => r.term)).not.toContain('spotify');
     });
 
     it('should still return N results when a blocked term is in the raw top (filter-before-slice)', async () => {
         await service.addToBlocklist(['spotify']);
-        const results = await service.getSuggestions('spo', 2);
+        const { suggestions: results } = await service.getSuggestions('spo', 2);
         // two remaining spo-prefixed terms: "sports news" and "spongebob"
         expect(results.length).toBe(2);
         expect(results.map(r => r.term)).not.toContain('spotify');
@@ -507,7 +516,7 @@ describe('AutocompleteService - blocklist', () => {
     it('should invalidate cache on add (blocked term should vanish immediately)', async () => {
         await service.getSuggestions('spo'); // populate cache (includes spotify)
         await service.addToBlocklist(['spotify']);
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results.map(r => r.term)).not.toContain('spotify');
     });
 
@@ -516,7 +525,7 @@ describe('AutocompleteService - blocklist', () => {
         const removed = await service.removeFromBlocklist('spotify');
         expect(removed).toBe(true);
 
-        const results = await service.getSuggestions('spo');
+        const { suggestions: results } = await service.getSuggestions('spo');
         expect(results.map(r => r.term)).toContain('spotify');
     });
 
