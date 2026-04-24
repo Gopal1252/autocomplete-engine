@@ -27,6 +27,7 @@ DB_PASSWORD=yourpassword
 DB_NAME=autocomplete
 REDIS_HOST=localhost
 REDIS_PORT=6379
+LOG_LEVEL=info
 ```
 
 Then:
@@ -46,27 +47,35 @@ curl "http://localhost:3000/autocomplete?q=spo&n=5"
 
 ## API
 
-**GET /autocomplete?q=prefix&n=count**
+### Search
+- `GET /autocomplete?q=<prefix>&n=<count>` — ranked suggestions for a prefix
+- `POST /ingest` — add search terms from raw query logs
+- `POST /event` — record impression/click events (feeds CTR ranking)
 
-Returns ranked suggestions for a prefix.
+### Term management
+- `GET /terms/:term` — fetch a single term's metadata
+- `PUT /terms/:term` — create or update a term with explicit frequency / CTR
+- `DELETE /terms/:term` — remove a term
+- `DELETE /terms` — wipe all terms
 
-**POST /ingest**
+### Blocklist
+- `GET /blocklist` — list blocked terms
+- `POST /blocklist` — block one or more terms (filtered from results)
+- `DELETE /blocklist/:term` — unblock
 
-Add new search terms at runtime.
+### Ops
+- `GET /health` — liveness (always 200 if process is up)
+- `GET /ready` — readiness (200 only if Postgres + Redis are reachable)
+- `GET /stats` — cache hit rate, total terms, etc.
 
+Example:
 ```bash
 curl -X POST http://localhost:3000/ingest \
   -H "Content-Type: application/json" \
   -d '{"logs": [{"query": "your search term", "timestamp": 1712188800000}]}'
 ```
 
-**POST /event**
-
-Track impressions and clicks for CTR-based ranking.
-
-**GET /stats**
-
-Returns system stats (cache hit rate, total terms, etc).
+Request bodies are validated with [zod](https://zod.dev); invalid input returns 400 with details.
 
 ## Running Tests
 
@@ -81,4 +90,8 @@ npm test
 - **Ranker** scores results using frequency, recency, and click-through rate
 - **Two-layer cache** — L1 (in-memory LRU) + L2 (Redis) with TTL
 - **Ingestion Pipeline** cleans and normalizes raw search logs before indexing
-- **AutocompleteService** ties everything together
+- **Postgres** is the source of truth; the in-memory trie + BK-tree are rebuilt on boot
+- **Blocklist** filters results after ranking, before top-N slicing (so N is always filled when possible)
+- **AutocompleteService** ties everything together; the Express layer is a thin wrapper
+
+Gzip response compression and graceful shutdown (SIGTERM/SIGINT drain + cleanup) are in place for hosting.
