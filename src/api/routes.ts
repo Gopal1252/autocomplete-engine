@@ -65,6 +65,11 @@ export function createRoutes(service: AutocompleteService): Router {
         });
     });
 
+    router.get('/terms', (_req, res) => {
+        const terms = service.getAllTerms();
+        res.json({ terms, count: terms.length });
+    });
+
     router.get('/terms/:term', (req,res) => {
         const term = decodeURIComponent(req.params.term);
         const result = service.getTerm(term);

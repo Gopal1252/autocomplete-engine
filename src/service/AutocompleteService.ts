@@ -215,6 +215,10 @@ export class AutocompleteService {
         return this.trie.get(cleaned);
     }
 
+    getAllTerms(): SearchTerm[] {
+        return this.trie.search('');
+    }
+
     async putTerm(term : string, metadata : {frequency?: number; clickThroughRate?: number}): Promise<SearchTerm> {
         const cleaned = Cleaner.clean(term);
         if (!Cleaner.isValid(cleaned)) throw new Error('Invalid term');
