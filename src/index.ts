@@ -36,10 +36,12 @@ async function main() {
     // create dependencies
     const repo = new SearchTermRepo();
     const blocklistRepo = new BlocklistRepo();
-    const redis = new Redis({
-        host: process.env.REDIS_HOST,
-        port: parseInt(process.env.REDIS_PORT!),
-    });
+    const redis = process.env.REDIS_URL
+        ? new Redis(process.env.REDIS_URL)
+        : new Redis({
+            host: process.env.REDIS_HOST || 'localhost',
+            port: parseInt(process.env.REDIS_PORT || '6379'),
+        });
     redis.on('error', (err) => {
         const msg = err.message || (err as AggregateError).errors?.[0]?.message || String(err);
         redisLog.error(msg);
@@ -57,7 +59,7 @@ async function main() {
     }
 
     // start server
-    const PORT = 3000;
+    const PORT = parseInt(process.env.PORT || '3000', 10);
     const app = createServer(service);
     const httpServer = app.listen(PORT, () => {
         log.info(`Autocomplete engine ready — ${service.getStats().totalTerms} terms indexed, listening on port ${PORT}`);
