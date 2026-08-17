@@ -28,6 +28,11 @@ export class RedisCache {
         await this.redis.flushdb();
     }  
     
+    //write to redis to reset the idle timer (a read like PING may not count)
+    async touch() : Promise<void>{
+        await this.redis.incr("keepalive:count");
+    }
+
     //ping redisCache
     async ping() : Promise<void>{
         const result = await this.redis.ping();

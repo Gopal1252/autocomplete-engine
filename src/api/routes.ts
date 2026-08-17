@@ -63,6 +63,24 @@ export function createRoutes(service: AutocompleteService): Router {
         });
     });
 
+    //keeps render awake, and touches postgres + redis so they don't go idle
+    router.get('/keepalive', async (req, res) => {
+        const token = process.env.KEEPALIVE_TOKEN;
+        if (!token || req.query.token !== token) {
+            res.status(401).json({ ok: false, error: 'Unauthorized' });
+            return;
+        }
+
+        const checks = await service.keepalive();
+        const healthy = checks.postgres === "ok" && checks.redis === "ok";
+        res.set('Cache-Control', 'no-store');
+        res.status(healthy ? 200 : 503).json({
+            ok: healthy,
+            ...checks,
+            at: new Date().toISOString()
+        });
+    });
+
     router.get('/terms', (_req, res) => {
         const terms = service.getAllTerms();
         res.json({ terms, count: terms.length });

@@ -210,6 +210,25 @@ export class AutocompleteService {
         return checks;
     }
 
+    //touch postgres and redis so idle providers don't pause/evict them
+    async keepalive(){
+        const checks = {postgres : "ok", redis : "ok"};
+        try{
+            await withTimeout(this.repo.ping(), 2000, 'postgres');
+        }
+        catch(e){
+            checks.postgres = `error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+
+        try{
+            await withTimeout(this.redisCache.touch(), 2000, 'redis');
+        }
+        catch(e){
+            checks.redis = `error: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        return checks;
+    }
+
     getTerm(term: string): SearchTerm | null{
         const cleaned = Cleaner.clean(term);
         return this.trie.get(cleaned);
